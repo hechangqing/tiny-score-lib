@@ -255,6 +255,55 @@ void TestOnlinePlp() {
   }
 }
 
+void TestOnlineFbank() {
+  std::ifstream is("../feat/test_data/test.wav", std::ios_base::binary);
+  WaveData wave;
+  wave.Read(is);
+  KALDI_ASSERT(wave.Data().NumRows() == 1);
+  SubVector<BaseFloat> waveform(wave.Data(), 0);
+
+  // the parametrization object
+  PlpOptions op;
+  op.frame_opts.dither = 0.0;
+  op.frame_opts.preemph_coeff = 0.0;
+  op.frame_opts.window_type = "hamming";
+  op.frame_opts.remove_dc_offset = false;
+  op.frame_opts.round_to_power_of_two = true;
+  op.frame_opts.samp_freq = wave.SampFreq();
+  op.mel_opts.low_freq = 0.0;
+  op.htk_compat = false;
+  op.use_energy = false;  // C0 not energy.
+  Plp plp(op);
+
+  // compute plp offline
+  Matrix<BaseFloat> plp_feats;
+  plp.Compute(waveform, 1.0, &plp_feats, NULL);  // vtln not supported
+
+  // compare
+  // The test waveform is about 1.44s long, so
+  // we try to break it into from 5 pieces to 9(not essential to do so)
+  for (int32 num_piece = 5; num_piece < 10; num_piece++) {
+    OnlinePlp online_plp(op);
+    std::vector<int32> piece_length(num_piece);
+    bool ret = RandomSplit(waveform.Dim(), &piece_length, num_piece);
+    KALDI_ASSERT(ret);
+
+    int32 offset_start = 0;
+    for (int32 i = 0; i < num_piece; i++) {
+      Vector<BaseFloat> wave_piece(
+        waveform.Range(offset_start, piece_length[i]));
+      online_plp.AcceptWaveform(wave.SampFreq(), wave_piece);
+      offset_start += piece_length[i];
+    }
+    online_plp.InputFinished();
+
+    Matrix<BaseFloat> online_plp_feats;
+    GetOutput(&online_plp, &online_plp_feats);
+
+    AssertEqual(plp_feats, online_plp_feats);
+  }
+}
+
 void TestOnlineTransform() {
   std::ifstream is("../feat/test_data/test.wav", std::ios_base::binary);
   WaveData wave;
@@ -396,6 +445,7 @@ int main() {
     TestOnlineSpliceFrames();
     TestOnlineMfcc();
     TestOnlinePlp();
+    //TestOnlineFbank();
     TestOnlineTransform();
     TestOnlineAppendFeature();
   }
